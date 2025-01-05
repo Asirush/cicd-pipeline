@@ -1,59 +1,102 @@
 pipeline {
-    agent {
-        label 'do-agent'
+    agent any
+    
+    environment {
+        DOCKER_CREDENTIALS_ID = 'ca74a05d-78e2-4aa7-ad98-15368fc7c18a'
+        IMAGE_NAME = 'epam-image'
     }
+    
     stages {
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
-                // Instead of `checkout scm`, explicitly define a GitSCM checkout using SSH
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']], // or whichever branch(es) you want
-                    extensions: [],
-                    userRemoteConfigs: [[
-                        url: 'git@github.com:Asirush/cicd-pipeline.git',
-                        credentialsId: 'ab80dd21-4128-4569-9d16-c60f4ef043f4'
-                    ]]
-                ])
+                git(url: 'https://github.com/proxyvert/cicd-pipeline.git', branch: 'main')
             }
         }
-
-        stage('Build') {
+        
+        stage('Application Build') {
+            agent {
+                docker {
+                    image 'node:18'
+                    reuseNode true
+                }
+            }
             steps {
-                sh 'chmod +x scripts/build.sh'
-                sh './scripts/build.sh'
+                script {
+                    try {
+                        sh '''
+                            echo "Starting application build..."
+                            node --version
+                            npm --version
+                            chmod +x ./scripts/build.sh
+                            ./scripts/build.sh
+                        '''
+                    } catch (Exception e) {
+                        error "Application build failed: ${e.getMessage()}"
+                    }
+                }
             }
         }
-
-        stage('Test') {
+        
+        stage('Tests') {
+            agent {
+                docker {
+                    image 'node:18'
+                    reuseNode true
+                }
+            }
             steps {
-                sh 'chmod +x scripts/test.sh'
-                sh './scripts/test.sh'
+                script {
+                    try {
+                        sh '''
+                            chmod +x ./scripts/test.sh
+                            ./scripts/test.sh
+                        '''
+                    } catch (Exception e) {
+                        error "Tests failed: ${e.getMessage()}"
+                    }
+                }
             }
         }
-
-        stage('Docker Build') {
+        
+        stage('Docker Image Build') {
             steps {
-                sh 'docker build -t mybuildimage .'
+                script {
+                    try {
+                        withCredentials([usernamePassword(
+                            credentialsId: DOCKER_CREDENTIALS_ID,
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )]) {
+                            sh """
+                                docker build -t \${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER} .
+                                docker tag \${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER} \${DOCKER_USER}/${IMAGE_NAME}:latest
+                            """
+                        }
+                    } catch (Exception e) {
+                        error "Docker image build failed: ${e.getMessage()}"
+                    }
+                }
             }
         }
-
-        stage('Docker Push') {
+        
+        stage('Docker Image Push') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'docker_hub_creds_id', 
-                        usernameVariable: 'DOCKERHUB_USERNAME', 
-                        passwordVariable: 'DOCKERHUB_PASSWORD'
-                    )
-                ]) {
-                    sh """
-                       docker login -u \${DOCKERHUB_USERNAME} -p \${DOCKERHUB_PASSWORD}
-                       docker tag mybuildimage \${DOCKERHUB_USERNAME}/my-app:\${BUILD_NUMBER}
-                       docker push \${DOCKERHUB_USERNAME}/my-app:\${BUILD_NUMBER}
-                       docker tag mybuildimage \${DOCKERHUB_USERNAME}/my-app:latest
-                       docker push \${DOCKERHUB_USERNAME}/my-app:latest
-                    """
+                script {
+                    try {
+                        withCredentials([usernamePassword(
+                            credentialsId: DOCKER_CREDENTIALS_ID,
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )]) {
+                            sh """
+                                echo '$DOCKER_PASS' | docker login -u '$DOCKER_USER' --password-stdin
+                                docker push \${DOCKER_USER}/${IMAGE_NAME}:${BUILD_NUMBER}
+                                docker push \${DOCKER_USER}/${IMAGE_NAME}:latest
+                            """
+                        }
+                    } catch (Exception e) {
+                        error "Docker image push failed: ${e.getMessage()}"
+                    }
                 }
             }
         }
