@@ -103,7 +103,7 @@ chmod +x ./scripts/test.sh
 
   }
   environment {
-    DOCKER_CREDENTIALS_ID = '8e962ffd-607f-400e-8aba-e83ac5c573ed'
+    DOCKER_CREDENTIALS_ID = '2b9ba1de-5797-4b34-985f-11cfa3918cda'
     IMAGE_NAME = 'epam'
   }
 }
